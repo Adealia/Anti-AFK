@@ -188,15 +188,13 @@ getWindowInfo(target)
 }
 
 ; Activate a window and yield until it does so.
-activateWindow(target)
+activateWindow(target, timeoutSeconds := 2)
 {
     if (!WinExist(target))
         return False
 
     WinActivate(target)
-    WinWaitActive(target)
-
-    return True
+    return WinWaitActive(target, , timeoutSeconds) != 0
 }
 
 ; Calculate the number of polls it will take for the time (in seconds) to pass.
