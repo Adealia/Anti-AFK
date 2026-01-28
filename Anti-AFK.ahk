@@ -44,6 +44,15 @@ TASK_INTERVAL := 15
 ;   user may 'leak' into the window while Anti-AFK moves it into focus.
 BLOCK_INPUT := False
 
+; FOCUS_FALLBACK (String):
+;   If Anti-AFK cannot restore focus to the window you were using before it sent
+;   input, this controls where focus should go instead.
+;   Options:
+;     - "Taskbar" (default): activate the Windows taskbar.
+;     - "None": do nothing.
+;     - Custom: any WinTitle string (e.g. "ahk_exe explorer.exe").
+FOCUS_FALLBACK := "Taskbar"
+
 ; PROCESS_LIST (Array):
 ;   This is a list of processes that Anti-AFK will montior. Any windows that do
 ;   not belong to any of these processes will be ignored.
@@ -58,6 +67,7 @@ PROCESS_OVERRIDES := Map(
     "wordpad.exe", Map(
         "WINDOW_TIMEOUT", 5,
         "TASK_INTERVAL", 5,
+        "FOCUS_FALLBACK", "Taskbar",
         "BLOCK_INPUT", False,
         "TASK", () => (
             Send("w")
@@ -117,21 +127,8 @@ resetTimer(windowID, resetAction, DenyInput)
     if (!targetInfo.Count)
         return False
 
+    program := targetInfo["EXE"]
     targetWindow := "ahk_id " targetInfo["ID"]
-
-    ; Activates the target window if there is no active window or the Desktop is focused.
-    ; Bringing the Desktop window to the front can cause some scaling issues, so we ignore it.
-    ; The Desktop's window has a class of "WorkerW" or "Progman".
-    if (!activeInfo.Count || (activeInfo["CLS"] = "WorkerW" || activeInfo["CLS"] = "Progman"))
-    {
-        if (activateWindow(targetWindow))
-        {
-            resetAction()
-            return True
-        }
-
-        return False
-    }
 
     ; Send input directly if the target window is already active.
     if (WinActive(targetWindow))
@@ -139,6 +136,8 @@ resetTimer(windowID, resetAction, DenyInput)
         resetAction()
         return True
     }
+
+    activeIsDesktop := (!activeInfo.Count || (activeInfo["CLS"] = "WorkerW" || activeInfo["CLS"] = "Progman"))
 
     inputWasBlocked := False
     transparencyApplied := False
@@ -170,14 +169,26 @@ resetTimer(windowID, resetAction, DenyInput)
             transparencyApplied := False
         }
 
-        oldActiveWindow := getWindow(
-            activeInfo["ID"],
-            activeInfo["PID"],
-            activeInfo["EXE"],
-            targetWindow
-        )
+        if (!activeIsDesktop)
+        {
+            oldActiveWindow := getWindow(
+                activeInfo["ID"],
+                activeInfo["PID"],
+                activeInfo["EXE"],
+                ""
+            )
 
-        activateWindow(oldActiveWindow)
+            if (oldActiveWindow && activateWindow(oldActiveWindow))
+                return True
+        }
+
+        if (WinActive(targetWindow))
+        {
+            fallbackWindow := getFocusFallback(program)
+            if (fallbackWindow)
+                activateWindow(fallbackWindow)
+        }
+
         return True
     }
     finally
@@ -248,6 +259,29 @@ getValue(value, program)
         return PROCESS_OVERRIDES[program][value]
     
     return %value%
+}
+
+; Resolve a focus fallback target based on configuration.
+; Returns a WinTitle string (or an empty string to indicate no fallback).
+getFocusFallback(program)
+{
+    fallback := getValue("FOCUS_FALLBACK", program)
+    fallback := Trim(fallback)
+
+    if (!fallback)
+        return ""
+
+    switch StrLower(fallback)
+    {
+        case "none":
+            return ""
+        case "taskbar":
+            return "ahk_class Shell_TrayWnd"
+        case "desktop":
+            return "ahk_class Shell_TrayWnd"
+    }
+
+    return fallback
 }
 
 ; Create and return an updated copy of the old window list. A new list is made from scratch and
