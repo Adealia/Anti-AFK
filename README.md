@@ -4,6 +4,7 @@ Supports unfocused windows in addition to multiple processes!<br>
 
 ## Setup
 Make sure to install [AutoHotkey](https://www.autohotkey.com/) if you haven't already.<br>
+This script requires AutoHotkey v2.<br>
 Open [Anti-AFK](Anti-AFK.ahk) in a text editor to access its config - each setting has a description.<br>
 You will need to add your target process into the `PROCESS_LIST` for it to be monitored.<br>
 
@@ -13,7 +14,9 @@ Refer to the script's comments for a more detailed overview.<br>
 - These windows are tracked for `WINDOW_TIMEOUT` minutes of inactivity.<br>
 - Keystrokes are sent to reset any potential AFK timers.<br>
   - This repeats every `TASK_INTERVAL` minutes for each inactive window.<br>
-  - Background windows are briefly made transparent and foregrounded.<br>
+  - Background windows can be briefly made transparent and foregrounded (`HIDE_WITH_TRANSPARENCY`).<br>
+  - Focus is restored when possible; otherwise a fallback is used (`FOCUS_FALLBACK`).<br>
+- Optional throttled TrayTip notifications can report activation/focus issues (`TRAYTIP_ON_ERROR`).<br>
 
 ## Locating Processes
 You can use a utility called `Window Spy`, which is bundled with AutoHotkey.<br>
