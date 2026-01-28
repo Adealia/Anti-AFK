@@ -74,9 +74,10 @@ PROCESS_LIST := ["notepad.exe", "wordpad.exe"]
 
 ; PROCESS_OVERRIDES (Associative Array):
 ;   This allows you to specify specific values of WINDOW_TIMEOUT, TASK_INTERVAL,
-;   TASK and BLOCK_INPUT for specific processes. This is helpful if different
-;   games consider you AFK at wildly different times, or if the function to
-;   reset the AFK timer does not work as well across different applications.
+;   TASK, BLOCK_INPUT, FOCUS_FALLBACK and HIDE_WITH_TRANSPARENCY for specific
+;   processes. This is helpful if different games consider you AFK at wildly
+;   different times, or if the reset action / focus behaviour differs across
+;   applications.
 PROCESS_OVERRIDES := Map(
     "wordpad.exe", Map(
         "WINDOW_TIMEOUT", 5,
