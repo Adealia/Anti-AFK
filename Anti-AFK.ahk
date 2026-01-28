@@ -234,7 +234,7 @@ activateWindow(target, timeoutSeconds := 2)
     return WinWaitActive(target, , timeoutSeconds) != 0
 }
 
-; Calculate the number of polls it will take for the time (in seconds) to pass.
+; Calculate the number of polls it will take for the time (in minutes) to pass.
 getLoops(value)
 {
     return Max(1, Round(value*60 / POLL_INTERVAL))
