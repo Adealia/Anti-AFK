@@ -58,6 +58,15 @@ FOCUS_FALLBACK := "Taskbar"
 ;   brings them to the foreground to send input.
 HIDE_WITH_TRANSPARENCY := True
 
+; TRAYTIP_ON_ERROR (Boolean):
+;   If enabled, Anti-AFK will show a throttled TrayTip when it encounters errors
+;   (for example when it cannot activate a window or restore focus).
+TRAYTIP_ON_ERROR := True
+
+; TRAYTIP_THROTTLE_SECONDS (Number):
+;   Minimum number of seconds between TrayTips for the same error type/process.
+TRAYTIP_THROTTLE_SECONDS := 30
+
 ; PROCESS_LIST (Array):
 ;   This is a list of processes that Anti-AFK will montior. Any windows that do
 ;   not belong to any of these processes will be ignored.
@@ -108,15 +117,27 @@ OnExit(cleanupOnExit)
 
 updateInProgress := False
 
+errorState := Map(
+    "count", 0,
+    "lastMessage", "",
+    "lastTime", "",
+    "notifyTimes", Map(),
+    "seen", Map()
+)
+
 ; Check if the script is running as admin and if keystrokes need to be blocked. If it does not have admin
 ; privileges the user is prompted to elevate it's permissions. Should they deny, the ability to block input
 ; is disabled and the script continues as normal.
 if (!A_IsAdmin)
 {
     requireAdmin := BLOCK_INPUT
+    blockedPrograms := []
     for program, override in PROCESS_OVERRIDES
         if (override.Has("BLOCK_INPUT") && override["BLOCK_INPUT"])
+        {
             requireAdmin := True
+            blockedPrograms.Push(program)
+        }
 
     if (requireAdmin)
     {
@@ -132,6 +153,17 @@ if (!A_IsAdmin)
             "This requires Anti-AFK to be run as Admin`nIt has been temporarily disabled",
             "Cannot Block Keystrokes", "OK Icon!"
         )
+
+        message := "BLOCK_INPUT requested but script is not running as admin; input blocking disabled"
+        if (blockedPrograms.Length > 0)
+        {
+            overridesText := ""
+            for i, p in blockedPrograms
+                overridesText .= (i = 1 ? "" : ", ") p
+
+            message := message " (overrides: " overridesText ")"
+        }
+        ReportIssue("InputBlockingDisabled", message)
     }
 }
 
@@ -164,67 +196,120 @@ resetTimer(windowID, resetAction, DenyInput)
 
     hideWithTransparency := getValue("HIDE_WITH_TRANSPARENCY", program)
 
+    pendingIssueKind := ""
+    pendingIssueMessage := ""
+    pendingIssueOnce := False
+    pendingIssueProgram := program
+    result := True
+
     inputWasBlocked := False
     transparencyApplied := False
     previousTransparency := ""
+    usedInputBlocking := False
+    usedTransparency := False
 
     try
     {
-        if (DenyInput && A_IsAdmin)
+        while True
         {
-            BlockInput("On")
-            inputWasBlocked := True
-        }
+            if (DenyInput && A_IsAdmin)
+            {
+                BlockInput("On")
+                inputWasBlocked := True
+                usedInputBlocking := True
+            }
 
-        if (hideWithTransparency)
-        {
-            try previousTransparency := WinGetTransparent(targetWindow)
+            if (hideWithTransparency)
+            {
+                try previousTransparency := WinGetTransparent(targetWindow)
+                try
+                {
+                    WinSetTransparent(0, targetWindow)
+                    transparencyApplied := True
+                    usedTransparency := True
+                    transparencyOverrides[targetHwnd] := previousTransparency
+                }
+            }
+
+            if (!activateWindow(targetWindow))
+            {
+                pendingIssueKind := "TargetActivateTimeout"
+                pendingIssueMessage := "Timed out activating " program
+                result := False
+                break
+            }
+
             try
             {
-                WinSetTransparent(0, targetWindow)
-                transparencyApplied := True
-                transparencyOverrides[targetHwnd] := previousTransparency
+                resetAction()
             }
-        }
-
-        if (!activateWindow(targetWindow))
-            return False
-
-        resetAction()
-
-        WinMoveBottom(targetWindow)
-
-        if (transparencyApplied)
-        {
-            if (restoreTransparency(targetWindow, previousTransparency))
+            catch as e
             {
-                transparencyApplied := False
-                if (transparencyOverrides.Has(targetHwnd))
-                    transparencyOverrides.Delete(targetHwnd)
+                pendingIssueKind := "TaskFailed"
+                pendingIssueMessage := program " TASK failed: " e.Message
+                result := False
+                break
             }
+
+            WinMoveBottom(targetWindow)
+
+            if (transparencyApplied)
+            {
+                if (restoreTransparency(targetWindow, previousTransparency))
+                {
+                    transparencyApplied := False
+                    if (transparencyOverrides.Has(targetHwnd))
+                        transparencyOverrides.Delete(targetHwnd)
+                }
+            }
+
+            restoredFocus := False
+            if (!activeIsDesktop)
+            {
+                oldActiveWindow := getWindow(
+                    activeInfo["ID"],
+                    activeInfo["PID"],
+                    activeInfo["EXE"],
+                    ""
+                )
+
+                if (oldActiveWindow && activateWindow(oldActiveWindow))
+                    restoredFocus := True
+            }
+
+            if (restoredFocus)
+                break
+
+            if (WinActive(targetWindow))
+            {
+                fallbackWindow := getFocusFallback(program)
+                if (!fallbackWindow)
+                {
+                    pendingIssueKind := "FocusRestoreFailed"
+                    pendingIssueMessage := "Could not restore focus for " program " (no fallback)"
+                    result := True
+                    break
+                }
+
+                if (activateWindow(fallbackWindow))
+                {
+                    configuredFallback := Trim(getValue("FOCUS_FALLBACK", program))
+                    configuredFallback := configuredFallback ? configuredFallback : "None"
+
+                    pendingIssueKind := "FocusFallbackUsed"
+                    pendingIssueMessage := "Using focus fallback: " configuredFallback
+                    result := True
+                    break
+                }
+
+                pendingIssueKind := "FocusFallbackFailed"
+                pendingIssueMessage := "Focus restore failed; fallback did not activate (" program ")"
+                result := True
+                break
+            }
+
+            break
         }
-
-        if (!activeIsDesktop)
-        {
-            oldActiveWindow := getWindow(
-                activeInfo["ID"],
-                activeInfo["PID"],
-                activeInfo["EXE"],
-                ""
-            )
-
-            if (oldActiveWindow && activateWindow(oldActiveWindow))
-                return True
-        }
-
-        if (WinActive(targetWindow))
-        {
-            fallbackWindow := getFocusFallback(program)
-            if (fallbackWindow)
-                activateWindow(fallbackWindow)
-        }
-
-        return True
     }
     finally
     {
@@ -239,6 +324,23 @@ resetTimer(windowID, resetAction, DenyInput)
         if (inputWasBlocked)
             BlockInput("Off")
     }
+
+    if (pendingIssueKind)
+    {
+        cleanupText := ""
+        if (usedInputBlocking)
+            cleanupText := cleanupText (cleanupText ? "; " : "") "input unblock attempted"
+        if (usedTransparency)
+            cleanupText := cleanupText (cleanupText ? "; " : "") "transparency restore attempted"
+
+        message := pendingIssueMessage
+        if (cleanupText)
+            message := message " (cleanup: " cleanupText ")"
+
+        ReportIssue(pendingIssueKind, message, pendingIssueProgram, pendingIssueOnce)
+    }
+
+    return result
 }
 
 restoreTransparency(targetWindow, previousTransparency)
@@ -321,6 +423,54 @@ getValue(value, program)
     return %value%
 }
 
+ReportIssue(kind, message, program := "", once := False)
+{
+    global errorState
+    global TRAYTIP_ON_ERROR
+    global TRAYTIP_THROTTLE_SECONDS
+
+    issueKey := kind
+    if (program)
+        issueKey := issueKey "|" program
+
+    if (once)
+    {
+        if (errorState["seen"].Has(issueKey))
+            return
+
+        errorState["seen"][issueKey] := True
+    }
+
+    errorState["count"] += 1
+    errorState["lastMessage"] := message
+    errorState["lastTime"] := FormatTime(, "HH:mm:ss")
+
+    if (!TRAYTIP_ON_ERROR)
+        return
+
+    now := A_TickCount
+    lastNotify := errorState["notifyTimes"].Has(issueKey) ? errorState["notifyTimes"][issueKey] : 0
+    if (now - lastNotify < TRAYTIP_THROTTLE_SECONDS * 1000)
+        return
+
+    errorState["notifyTimes"][issueKey] := now
+    TrayTip(message, "Anti-AFK")
+}
+
+appendErrorSummary(tip)
+{
+    global errorState
+
+    if (errorState["count"] <= 0)
+        return tip
+
+    summary := "Last issue (" errorState["count"] "): " errorState["lastMessage"]
+    if (errorState["lastTime"])
+        summary := summary " @ " errorState["lastTime"]
+
+    return tip "`n`n" summary
+}
+
 ; Resolve a focus fallback target based on configuration.
 ; Returns a WinTitle string (or an empty string to indicate no fallback).
 getFocusFallback(program)
@@ -338,6 +488,7 @@ getFocusFallback(program)
         case "taskbar":
             return "ahk_class Shell_TrayWnd"
         case "desktop":
+            ReportIssue("InvalidConfig", "FOCUS_FALLBACK 'Desktop' is not supported; using Taskbar", program, True)
             return "ahk_class Shell_TrayWnd"
     }
 
@@ -416,6 +567,7 @@ updateSysTray(windowList)
                 newTip := newTip program " - " windows "`n"
 
             newTip := RTrim(newTip, "`n")
+            newTip := appendErrorSummary(newTip)
             A_IconTip := newTip
         }
         else
@@ -425,6 +577,7 @@ updateSysTray(windowList)
                 newTip := newTip program " - " windows "`n"
 
             newTip := RTrim(newTip, "`n")
+            newTip := appendErrorSummary(newTip)
             A_IconTip := newTip
         }
 
@@ -443,6 +596,7 @@ updateSysTray(windowList)
             newTip := newTip program " - " windows "`n"
 
         newTip := RTrim(newTip, "`n")
+        newTip := appendErrorSummary(newTip)
         A_IconTip := newTip
 
         return
@@ -452,7 +606,7 @@ updateSysTray(windowList)
     ; Essensially the script isn't doing anything and we make sure the icon conveys
     ; this if it hasn't already.
     TraySetIcon(A_AhkPath, 5)
-    A_IconTip := "No windows found"
+    A_IconTip := appendErrorSummary("No windows found")
 }
 
 ; Go through each window in the list and decrement it's timer.
