@@ -224,7 +224,7 @@ updateWindowList(oldWindowList, processList)
     for _, program in processList
     {
         newList := Map()
-        for _, handle in WinGetList("ahk_exe" program)
+        for _, handle in WinGetList("ahk_exe " program)
         {
             if (oldWindowList[program].Has(handle))
                 newList[handle] := oldWindowList[program][handle]
@@ -334,7 +334,7 @@ tickWindowList(windowList)
     {
         for handle, timeLeft in windows
         {
-            if (WinActive("ahk_id" handle))
+            if (WinActive("ahk_id " handle))
             {
                 ; If the program is active and has not timed out, we set it's timeout back to
                 ; the limit. The user will need to interact with it to send it to the back and
