@@ -114,43 +114,80 @@ resetTimer(windowID, resetAction, DenyInput)
     activeInfo := getWindowInfo("A")
     targetInfo := getWindowInfo("ahk_id " windowID)
 
+    if (!targetInfo.Count)
+        return False
+
     targetWindow := "ahk_id " targetInfo["ID"]
 
     ; Activates the target window if there is no active window or the Desktop is focused.
     ; Bringing the Desktop window to the front can cause some scaling issues, so we ignore it.
     ; The Desktop's window has a class of "WorkerW" or "Progman".
     if (!activeInfo.Count || (activeInfo["CLS"] = "WorkerW" || activeInfo["CLS"] = "Progman"))
-        activateWindow(targetWindow)
+    {
+        if (activateWindow(targetWindow))
+        {
+            resetAction()
+            return True
+        }
+
+        return False
+    }
 
     ; Send input directly if the target window is already active.
     if (WinActive(targetWindow))
     {
         resetAction()
-        return
+        return True
     }
 
-    if (DenyInput && A_IsAdmin)
-        BlockInput("On")
+    inputWasBlocked := False
+    transparencyApplied := False
 
-    WinSetTransparent(0, targetWindow)
-    activateWindow(targetWindow)
+    try
+    {
+        if (DenyInput && A_IsAdmin)
+        {
+            BlockInput("On")
+            inputWasBlocked := True
+        }
 
-    resetAction()
+        try
+        {
+            WinSetTransparent(0, targetWindow)
+            transparencyApplied := True
+        }
 
-    WinMoveBottom(targetWindow)
-    WinSetTransparent("OFF", targetWindow)
+        if (!activateWindow(targetWindow))
+            return False
 
-    oldActiveWindow := getWindow(
-        activeInfo["ID"],
-        activeInfo["PID"],
-        activeInfo["EXE"],
-        targetWindow
-    )
+        resetAction()
 
-    activateWindow(oldActiveWindow)
+        WinMoveBottom(targetWindow)
 
-    if (DenyInput && A_IsAdmin)
-        BlockInput("Off")
+        if (transparencyApplied)
+        {
+            try WinSetTransparent("OFF", targetWindow)
+            transparencyApplied := False
+        }
+
+        oldActiveWindow := getWindow(
+            activeInfo["ID"],
+            activeInfo["PID"],
+            activeInfo["EXE"],
+            targetWindow
+        )
+
+        activateWindow(oldActiveWindow)
+        return True
+    }
+    finally
+    {
+        if (transparencyApplied)
+            try WinSetTransparent("OFF", targetWindow)
+
+        if (inputWasBlocked)
+            BlockInput("Off")
+    }
 }
 
 ; Fetch the window which best matches the given criteria.
