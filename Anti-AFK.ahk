@@ -53,6 +53,11 @@ BLOCK_INPUT := False
 ;     - Custom: any WinTitle string (e.g. "ahk_exe explorer.exe").
 FOCUS_FALLBACK := "Taskbar"
 
+; HIDE_WITH_TRANSPARENCY (Boolean):
+;   If enabled, background windows are made transparent while Anti-AFK briefly
+;   brings them to the foreground to send input.
+HIDE_WITH_TRANSPARENCY := True
+
 ; PROCESS_LIST (Array):
 ;   This is a list of processes that Anti-AFK will montior. Any windows that do
 ;   not belong to any of these processes will be ignored.
@@ -69,6 +74,7 @@ PROCESS_OVERRIDES := Map(
         "TASK_INTERVAL", 5,
         "FOCUS_FALLBACK", "Taskbar",
         "BLOCK_INPUT", False,
+        "HIDE_WITH_TRANSPARENCY", True,
         "TASK", () => (
             Send("w")
         )
@@ -85,6 +91,20 @@ InstallMouseHook()
 windowList := Map()
 for _, program in PROCESS_LIST
     windowList[program] := Map()
+
+transparencyOverrides := Map()
+
+cleanupOnExit(*)
+{
+    global transparencyOverrides
+
+    for hwnd, previousTransparency in transparencyOverrides
+        restoreTransparency("ahk_id " hwnd, previousTransparency)
+
+    try BlockInput("Off")
+}
+
+OnExit(cleanupOnExit)
 
 ; Check if the script is running as admin and if keystrokes need to be blocked. If it does not have admin
 ; privileges the user is prompted to elevate it's permissions. Should they deny, the ability to block input
@@ -128,6 +148,7 @@ resetTimer(windowID, resetAction, DenyInput)
         return False
 
     program := targetInfo["EXE"]
+    targetHwnd := targetInfo["ID"]
     targetWindow := "ahk_id " targetInfo["ID"]
 
     ; Send input directly if the target window is already active.
@@ -139,8 +160,11 @@ resetTimer(windowID, resetAction, DenyInput)
 
     activeIsDesktop := (!activeInfo.Count || (activeInfo["CLS"] = "WorkerW" || activeInfo["CLS"] = "Progman"))
 
+    hideWithTransparency := getValue("HIDE_WITH_TRANSPARENCY", program)
+
     inputWasBlocked := False
     transparencyApplied := False
+    previousTransparency := ""
 
     try
     {
@@ -150,10 +174,15 @@ resetTimer(windowID, resetAction, DenyInput)
             inputWasBlocked := True
         }
 
-        try
+        if (hideWithTransparency)
         {
-            WinSetTransparent(0, targetWindow)
-            transparencyApplied := True
+            try previousTransparency := WinGetTransparent(targetWindow)
+            try
+            {
+                WinSetTransparent(0, targetWindow)
+                transparencyApplied := True
+                transparencyOverrides[targetHwnd] := previousTransparency
+            }
         }
 
         if (!activateWindow(targetWindow))
@@ -165,8 +194,12 @@ resetTimer(windowID, resetAction, DenyInput)
 
         if (transparencyApplied)
         {
-            try WinSetTransparent("OFF", targetWindow)
-            transparencyApplied := False
+            if (restoreTransparency(targetWindow, previousTransparency))
+            {
+                transparencyApplied := False
+                if (transparencyOverrides.Has(targetHwnd))
+                    transparencyOverrides.Delete(targetHwnd)
+            }
         }
 
         if (!activeIsDesktop)
@@ -194,10 +227,35 @@ resetTimer(windowID, resetAction, DenyInput)
     finally
     {
         if (transparencyApplied)
-            try WinSetTransparent("OFF", targetWindow)
+        {
+            restoreTransparency(targetWindow, previousTransparency)
+        }
+
+        if (transparencyOverrides.Has(targetHwnd))
+            transparencyOverrides.Delete(targetHwnd)
 
         if (inputWasBlocked)
             BlockInput("Off")
+    }
+}
+
+restoreTransparency(targetWindow, previousTransparency)
+{
+    if (!WinExist(targetWindow))
+        return True
+
+    try
+    {
+        if (previousTransparency = "" || StrLower(previousTransparency) = "off")
+            WinSetTransparent("Off", targetWindow)
+        else
+            WinSetTransparent(previousTransparency, targetWindow)
+
+        return True
+    }
+    catch
+    {
+        return False
     }
 }
 
