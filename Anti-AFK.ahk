@@ -354,7 +354,7 @@ tickWindowList(windowList)
                 ; We can achieve this by setting the time left to one. It will be decremented immediately
                 ; afterwards and the script will activate as it sees the time left has reached zero.
                 if (timeLeft["type"] = "Timeout")
-                    timeLeft["value"] = 1
+                    timeLeft["value"] := 1
             }
 
             ; Decrement the time left, if it reaches zero reset the AFK timer. Then reset the time
