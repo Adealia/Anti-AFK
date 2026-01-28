@@ -106,6 +106,8 @@ cleanupOnExit(*)
 
 OnExit(cleanupOnExit)
 
+updateInProgress := False
+
 ; Check if the script is running as admin and if keystrokes need to be blocked. If it does not have admin
 ; privileges the user is prompted to elevate it's permissions. Should they deny, the ability to block input
 ; is disabled and the script continues as normal.
@@ -512,14 +514,24 @@ tickWindowList(windowList)
 updateScript()
 {
     global windowList
-    global BLOCK_INPUT
     global PROCESS_LIST
-    global PROCESS_OVERRIDES
+    global updateInProgress
 
-    windowList := updateWindowList(windowList, PROCESS_LIST)
-    windowList := tickWindowList(windowList)
+    if (updateInProgress)
+        return
 
-    updateSysTray(windowList)
+    updateInProgress := True
+    try
+    {
+        windowList := updateWindowList(windowList, PROCESS_LIST)
+        windowList := tickWindowList(windowList)
+
+        updateSysTray(windowList)
+    }
+    finally
+    {
+        updateInProgress := False
+    }
 }
 
 ; Start Anti-AFK
